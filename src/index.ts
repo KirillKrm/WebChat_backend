@@ -1,18 +1,37 @@
-const express = require('express')
-const path = require('path')
-const PORT = 3000
-let activeSockets: string[] = []
+import express from 'express'
+import { createServer } from 'http'
+import { Server, Socket } from 'socket.io'
 
 const app = express()
-const server = require('http').createServer(app)
-const io = require('socket.io')(server)
+const server = createServer(app)
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST'],
+  },
+})
 
-app.use(express.static(__dirname))
+const PORT = process.env.PORT || 3001
+const HOSTNAME = 'localhost'
+let activeSockets: string[] = []
+
+app.get('/', (req, res) => {
+  res.send('Server is running.')
+})
+
+type MakeUserData = {
+  offer: 'offer'
+  answer: 'answer'
+  to: string
+  from: string
+}
 
 io.on('connection', (socket: any) => {
-  console.log('Socked connected with id: ' + socket.id)
+  console.log('Client connected with ID: ' + socket.id)
+  socket.emit('status', 'Socket was connected')
+
   const existingSocket = activeSockets.find(
-    (existingSocket) => existingSocket === socket.id
+    (existingSocket: any) => existingSocket === socket.id
   )
 
   if (!existingSocket) {
@@ -20,7 +39,7 @@ io.on('connection', (socket: any) => {
 
     socket.emit('update-user-list', {
       users: activeSockets.filter(
-        (existingSocket) => existingSocket !== socket.id
+        (existingSocket: any) => existingSocket !== socket.id
       ),
     })
 
@@ -28,33 +47,28 @@ io.on('connection', (socket: any) => {
       users: [socket.id],
     })
   }
+
+  socket.on('create-room', (userName: string, socketID: string) => {
+    const roomID = Math.random().toString(32).substring(2)
+    socket.join(roomID)
+    console.log(userName, socketID, 'connected to', roomID)
+    socket.to(roomID).emit('update-room', userName, socketID, roomID)
+  })
+
+  socket.on(
+    'connect-room',
+    (userName: string, socketID: string, roomID: string) => {
+      socket.join(roomID)
+      socket.to(roomID).emit('user-connected', userName, socketID)
+    }
+  )
+
   socket.on('disconnect', () => {
-    activeSockets = activeSockets.filter(
-      (existingSocket) => existingSocket !== socket.id
-    )
-    socket.broadcast.emit('remove-user', {
-      socketId: socket.id,
-    })
-  })
-  socket.on('call-user', (data: any) => {
-    socket.to(data.to).emit('call-made', {
-      offer: data.offer,
-      socket: socket.id,
-    })
-  })
-  socket.on('make-answer', (data: any) => {
-    socket.to(data.to).emit('answer-made', {
-      socket: socket.id,
-      answer: data.answer,
-    })
-  })
-  socket.on('reject-call', (data: any) => {
-    socket.to(data.from).emit('call-rejected', {
-      socket: socket.id,
-    })
+    socket.leave()
+    console.log('Socket', socket.id, 'disconnected.')
   })
 })
 
 server.listen(PORT, () => {
-  console.log(`Server is listening on http://localhost:${PORT}`)
+  console.log(`Server is listening on http://${HOSTNAME}:${PORT}`)
 })
